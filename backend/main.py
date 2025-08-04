@@ -3,11 +3,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from utils.llm_utils import get_gemini_response
+
 from routes.workflow import router as workflow_router
+from routes.knowledge_base import router as kb_router
+
 
 app = FastAPI()
 
 app.include_router(workflow_router)
+app.include_router(kb_router)
 
 # Allow frontend to call backend
 app.add_middleware(
