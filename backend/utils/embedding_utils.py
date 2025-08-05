@@ -1,20 +1,13 @@
-import google.generativeai as genai
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+from sentence_transformers import SentenceTransformer
 
-genai.configure(api_key=GEMINI_API_KEY)
+# Load the sentence-transformer model once (you can change the model name if needed)
+_st_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def get_embedding_from_text(text):
-    model = genai.GenerativeModel("embedding-001")  # Use correct embedding model
     try:
-        response = model.embed_content(
-            content=text,
-            task_type="retrieval_document"
-        )
-        return response["embedding"]
+        embedding = _st_model.encode(text)
+        return embedding.tolist() if hasattr(embedding, 'tolist') else embedding
     except Exception as e:
         print("Embedding generation failed:", e)
         return None
