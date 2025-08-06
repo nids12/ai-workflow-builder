@@ -1,13 +1,25 @@
 import React, { useCallback, useState } from "react";
+import Sidebar from "./Sidebar";
 import axios from "axios";
-import ReactFlow, { addEdge, MiniMap, Controls, Background } from "reactflow";
+import ReactFlow, {
+  addEdge,
+  MiniMap,
+  Controls,
+  Background,
+  applyNodeChanges,
+  Handle,
+} from "reactflow";
+import { FaUser, FaDatabase, FaRobot, FaFileAlt } from "react-icons/fa";
 import "reactflow/dist/style.css";
 import FileUploadPanel from "./FileUploadPanel";
 
-const initialNodes = [];
-const initialEdges = [];
+const componentLibrary = [
+  { type: "userQuery", label: "User Query", icon: FaUser },
+  { type: "knowledgeBase", label: "KnowledgeBase", icon: FaDatabase },
+  { type: "llmEngine", label: "LLM Engine", icon: FaRobot },
+  { type: "output", label: "Output", icon: FaFileAlt },
+];
 
-// Utility to ensure all nodes have a valid position
 function sanitizeNodes(nodes) {
   return nodes.map((node) => ({
     ...node,
@@ -20,27 +32,102 @@ function sanitizeNodes(nodes) {
   }));
 }
 
-const componentLibrary = [
-  { type: "userQuery", label: "User Query" },
-  { type: "knowledgeBase", label: "KnowledgeBase" },
-  { type: "llmEngine", label: "LLM Engine" },
-  { type: "output", label: "Output" },
-];
+function CustomNode({ data }) {
+  const Icon = data && data.icon ? data.icon : null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        padding: "10px 14px",
+        border: "2px solid #e5e7eb",
+        borderRadius: 8,
+        background: "#f9fafb",
+        fontWeight: 500,
+        fontSize: 15,
+        boxShadow: "0 1px 4px 0 rgba(0,0,0,0.04)",
+        minWidth: 120,
+        minHeight: 40,
+        position: "relative",
+      }}
+    >
+      <Handle type="target" position="left" style={{ background: "#555" }} />
+      {Icon ? <Icon size={20} style={{ marginRight: 8 }} /> : null}
+      {data && data.label ? data.label : "Node"}
+      <Handle type="source" position="right" style={{ background: "#555" }} />
+    </div>
+  );
+}
+
+const nodeTypes = {
+  customNode: CustomNode,
+};
+
+const initialNodes = [];
+const initialEdges = [];
+
+// ...existing code...
 
 // Assignment-ready: Visual AI Workflow Builder with import/export, run, and extensible config
 function WorkflowBuilder({ onBuildStack, onChatWithStack }) {
+  // Validate workflow before export/run
+  function validateWorkflow(nodes, edges) {
+    const requiredTypes = [
+      "User Query",
+      "KnowledgeBase",
+      "LLM Engine",
+      "Output",
+    ];
+    const nodeLabels = nodes.map((n) =>
+      n && n.data && typeof n.data.label === "string" ? n.data.label : ""
+    );
+    for (let type of requiredTypes) {
+      if (!nodeLabels.includes(type)) {
+        return `Missing required node: ${type}`;
+      }
+    }
+    // Check all nodes are connected (except isolated output)
+    const nodeIds = nodes.map((n) => n.id);
+    const connected = new Set();
+    edges.forEach((e) => {
+      connected.add(e.source);
+      connected.add(e.target);
+    });
+    for (let id of nodeIds) {
+      const node = nodes.find((n) => n.id === id);
+      const label =
+        node && node.data && typeof node.data.label === "string"
+          ? node.data.label
+          : id;
+      if (!connected.has(id)) {
+        return `Node not connected: ${label}`;
+      }
+    }
+    // Check configs
+    for (let n of nodes) {
+      const label =
+        n && n.data && typeof n.data.label === "string" ? n.data.label : "";
+      if (label === "User Query" && !(n.data && n.data.prompt))
+        return "User Query node missing prompt.";
+      if (label === "LLM Engine" && !(n.data && n.data.model))
+        return "LLM Engine node missing model.";
+      if (label === "Output" && !(n.data && n.data.format))
+        return "Output node missing format.";
+    }
+    return null;
+  }
   const [nodes, setNodes] = useState(initialNodes);
   const [edges, setEdges] = useState(initialEdges);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [resultModal, setResultModal] = useState({ open: false, content: "" });
   const [labelEdit, setLabelEdit] = useState({
     open: false,
     id: null,
     type: null,
     value: "",
   });
-  const [helpOpen, setHelpOpen] = useState(false);
-  // Node/edge label editing
+  const [resultModal, setResultModal] = useState({ open: false, content: "" });
+
+  // Double click node to edit label
   const handleNodeDoubleClick = (_, node) => {
     setLabelEdit({
       open: true,
@@ -49,14 +136,11 @@ function WorkflowBuilder({ onBuildStack, onChatWithStack }) {
       value: node.data.label || "",
     });
   };
-  const handleEdgeDoubleClick = (_, edge) => {
-    setLabelEdit({
-      open: true,
-      id: edge.id,
-      type: "edge",
-      value: edge.label || "",
-    });
-  };
+
+  // Double click edge to edit label
+  // (already declared above)
+
+  // Save label edit
   const handleLabelSave = () => {
     if (labelEdit.type === "node") {
       setNodes((nds) =>
@@ -80,46 +164,89 @@ function WorkflowBuilder({ onBuildStack, onChatWithStack }) {
     }
     setLabelEdit({ open: false, id: null, type: null, value: "" });
   };
-  // Assignment: Validate workflow before run/export
-  function validateWorkflow(nodes, edges) {
-    const requiredTypes = [
-      "User Query",
-      "KnowledgeBase",
-      "LLM Engine",
-      "Output",
-    ];
-    const nodeLabels = nodes.map((n) => (n.data && n.data.label) || "");
-    for (let type of requiredTypes) {
-      if (!nodeLabels.includes(type)) {
-        return `Missing required node: ${type}`;
+
+  // Drag from library to canvas
+  const onDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+      console.log("onDrop event fired", event);
+      const raw = event.dataTransfer.getData("application/reactflow");
+      console.log("Drop raw payload:", raw);
+      if (!raw) {
+        console.warn("No payload found in drop event");
+        return;
       }
-    }
-    // Check all nodes are connected (except isolated output)
-    const nodeIds = nodes.map((n) => n.id);
-    const connected = new Set();
-    edges.forEach((e) => {
-      connected.add(e.source);
-      connected.add(e.target);
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { type: raw };
+      }
+      console.log("Parsed drop data:", data);
+      let node = null;
+      // Generate a robust unique id for each node
+      const uniqueId = `${Math.floor(Math.random() * 1e6)}_${Date.now()}`;
+      if (data.type === "PDF") {
+        node = {
+          id: `pdf_${data.id}_${uniqueId}`,
+          type: "default",
+          data: {
+            label: data.filename || "PDF",
+            pdfId: data.id,
+            filename: data.filename,
+            icon: FaFileAlt,
+          },
+          position: { x: 100, y: 100 },
+        };
+      } else {
+        let comp = componentLibrary.find(
+          (c) =>
+            c.label.toLowerCase() === data.type.toLowerCase() ||
+            c.type.toLowerCase() === data.type.toLowerCase()
+        );
+        if (!comp) {
+          console.warn("Component not found for drop:", data.type);
+          comp = componentLibrary[0];
+        }
+        node = {
+          id: `${comp.type}_${uniqueId}`,
+          type: "customNode",
+          data: {
+            label: comp.label,
+            icon: comp.icon,
+            ...(comp.label === "LLM Engine" ? { model: "gemini" } : {}),
+            ...(comp.label === "Output" ? { format: "text" } : {}),
+          },
+          position: { x: 100, y: 100 },
+        };
+      }
+      console.log("Node to add:", node);
+      setNodes((nds) =>
+        sanitizeNodes([
+          ...nds,
+          node.type === "dimensions" ? { ...node, type: "customNode" } : node,
+        ])
+      );
+    },
+    [setNodes]
+  );
+
+  // ...existing code...
+  // Double click node to edit label
+  // (already declared above)
+
+  // Double click edge to edit label
+  const handleEdgeDoubleClick = (_, edge) => {
+    setLabelEdit({
+      open: true,
+      id: edge.id,
+      type: "edge",
+      value: edge.label || "",
     });
-    for (let id of nodeIds) {
-      const node = nodes.find((n) => n.id === id);
-      const label = (node && node.data && node.data.label) || id;
-      if (!connected.has(id)) {
-        return `Node not connected: ${label}`;
-      }
-    }
-    // Check configs
-    for (let n of nodes) {
-      const label = (n.data && n.data.label) || "";
-      if (label === "User Query" && !(n.data && n.data.prompt))
-        return "User Query node missing prompt.";
-      if (label === "LLM Engine" && !(n.data && n.data.model))
-        return "LLM Engine node missing model.";
-      if (label === "Output" && !(n.data && n.data.format))
-        return "Output node missing format.";
-    }
-    return null;
-  }
+  };
+
+  // Save label edit
+  // (already declared above)
 
   // Helper to update node data by id (for config panel)
   // Export workflow as JSON (with validation)
@@ -207,32 +334,12 @@ function WorkflowBuilder({ onBuildStack, onChatWithStack }) {
   };
 
   // Drag from library to canvas
-  const onDrop = useCallback(
-    (event) => {
-      event.preventDefault();
-      const type = event.dataTransfer.getData("componentType");
-      const position = { x: event.clientX - 250, y: event.clientY - 50 };
-      const id = `${type}_${+new Date()}`;
-      setNodes((nds) =>
-        sanitizeNodes([
-          ...nds,
-          {
-            id,
-            type: "default",
-            data: {
-              label: componentLibrary.find((c) => c.type === type).label,
-            },
-            position,
-          },
-        ])
-      );
-    },
-    [setNodes]
-  );
+  // (already declared above)
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
+    console.log("onDragOver event fired", event);
   }, []);
 
   // Edge creation constraints
@@ -298,166 +405,39 @@ function WorkflowBuilder({ onBuildStack, onChatWithStack }) {
 
   return (
     <div style={{ display: "flex", height: "90vh", minHeight: 600 }}>
-      {/* Component Library & Workflow Actions */}
-      <div style={{ width: 200, borderRight: "1px solid #ddd", padding: 10 }}>
-        <h4>Component Library</h4>
-        {componentLibrary.map((comp) => (
-          <div
-            key={comp.type}
-            draggable
-            onDragStart={(e) =>
-              e.dataTransfer.setData("componentType", comp.type)
-            }
-            style={{
-              border: "1px solid #aaa",
-              borderRadius: 4,
-              padding: 8,
-              marginBottom: 8,
-              background: "#f9f9f9",
-              cursor: "grab",
-            }}
-          >
-            {comp.label}
-          </div>
-        ))}
-        <button
-          style={{ marginTop: 20, width: "100%" }}
-          onClick={handleBuildStack}
-        >
-          Build Stack
-        </button>
-        <button
-          style={{ marginTop: 10, width: "100%" }}
-          onClick={handleChatWithStack}
-        >
-          Chat with Stack
-        </button>
-        <button
-          style={{ marginTop: 10, width: "100%" }}
-          onClick={handleRunWorkflow}
-        >
-          Run Workflow
-        </button>
-        <button style={{ marginTop: 10, width: "100%" }} onClick={handleExport}>
-          Export Workflow
-        </button>
-        <button style={{ marginTop: 10, width: "100%" }} onClick={handleReset}>
-          Reset Workflow
-        </button>
-        <button
-          style={{ marginTop: 10, width: "100%" }}
-          onClick={handleDeleteNode}
-          disabled={!selectedNode}
-        >
-          Delete Selected Node
-        </button>
-        <button
-          style={{ marginTop: 10, width: "100%" }}
-          onClick={() => setHelpOpen(true)}
-        >
-          Help / Instructions
-        </button>
-        {/* Help/Instructions Modal */}
-        {helpOpen && (
-          <div
-            style={{
-              position: "fixed",
-              left: 0,
-              top: 0,
-              width: "100vw",
-              height: "100vh",
-              background: "rgba(0,0,0,0.3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 1002,
-            }}
-          >
-            <div
-              style={{
-                background: "#fff",
-                padding: 24,
-                borderRadius: 8,
-                minWidth: 340,
-                maxWidth: 600,
-                maxHeight: "80vh",
-                overflowY: "auto",
-              }}
-            >
-              <h3>Workflow Builder Instructions</h3>
-              <ul>
-                <li>
-                  Drag components from the library onto the canvas to build your
-                  workflow.
-                </li>
-                <li>
-                  Connect nodes by dragging from one node's handle to another.
-                </li>
-                <li>Double-click a node or edge to edit its label.</li>
-                <li>
-                  Select a node to configure its properties in the right panel.
-                </li>
-                <li>Upload PDFs for KnowledgeBase nodes.</li>
-                <li>
-                  Use <b>Run Workflow</b> to execute your workflow and see
-                  results.
-                </li>
-                <li>
-                  Use <b>Export</b> and <b>Import</b> to save/load workflows.
-                </li>
-                <li>
-                  Use <b>Delete Selected Node</b> to remove a node and its
-                  connections.
-                </li>
-                <li>
-                  Use <b>Reset Workflow</b> to clear the canvas.
-                </li>
-                <li>
-                  Edge creation is constrained: e.g., Output cannot have
-                  outgoing edges, User Query cannot have incoming edges, etc.
-                </li>
-              </ul>
-              <button
-                onClick={() => setHelpOpen(false)}
-                style={{ float: "right" }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-        <label style={{ marginTop: 10, width: "100%", display: "block" }}>
-          <input
-            type="file"
-            accept="application/json"
-            style={{ display: "none" }}
-            onChange={handleImport}
-          />
-          <span
-            style={{
-              display: "inline-block",
-              width: "100%",
-              padding: "6px 0",
-              background: "#eee",
-              borderRadius: 4,
-              textAlign: "center",
-              cursor: "pointer",
-              marginTop: 4,
-            }}
-          >
-            Import Workflow
-          </span>
-        </label>
-      </div>
+      {/* Sidebar for drag-and-drop components and PDFs */}
+      <Sidebar
+        onBuildStack={handleBuildStack}
+        onChatWithStack={handleChatWithStack}
+        onRunWorkflow={handleRunWorkflow}
+        onExportWorkflow={handleExport}
+        onImportWorkflow={(e) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".json";
+          input.onchange = handleImport;
+          input.click();
+        }}
+        onResetWorkflow={handleReset}
+        onDeleteNode={handleDeleteNode}
+        onHelpInstructions={() => alert("Help instructions coming soon!")}
+      />
 
       {/* Workflow Canvas */}
       <div
         style={{ flex: 1, position: "relative", minHeight: 600, minWidth: 400 }}
       >
         <ReactFlow
-          nodes={sanitizeNodes(nodes)}
+          nodes={sanitizeNodes(
+            nodes.map((n) =>
+              n.type === "dimensions" ? { ...n, type: "customNode" } : n
+            )
+          )}
           edges={edges}
-          onNodesChange={setNodes}
+          nodeTypes={nodeTypes}
+          onNodesChange={(changes) =>
+            setNodes((nds) => applyNodeChanges(changes, nds))
+          }
           onEdgesChange={setEdges}
           onConnect={onConnect}
           onDrop={onDrop}

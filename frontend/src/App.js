@@ -9,8 +9,7 @@ function App() {
 
   return (
     <div className="App">
-      {/* PDF Upload and Q&A Panel */}
-      <FileUploadPanel />
+      {/* PDF Upload and Q&A Panel removed. Only available in KnowledgeBase node config. */}
       <WorkflowBuilder
         onBuildStack={setWorkflow}
         onChatWithStack={() => setChatOpen(true)}

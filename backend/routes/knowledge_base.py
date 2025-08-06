@@ -1,8 +1,6 @@
 
-
-
 import os
-from fastapi import APIRouter, UploadFile, File, Depends
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from utils.embedding_utils import get_embedding_from_text
 from utils.pdf_utils import extract_text_from_pdf
@@ -13,11 +11,20 @@ from models import Document
 # Define router at the top so it's available for all route decorators
 router = APIRouter()
 
-
-
-
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Endpoint to get PDF text by filename
+@router.get("/document-text/{filename}")
+def get_document_text(filename: str):
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        text = extract_text_from_pdf(file_path)
+        return {"text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to extract text: {e}")
 
 def get_db():
     db = SessionLocal()

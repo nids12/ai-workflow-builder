@@ -22,15 +22,37 @@ function ChatModal({ open, onClose, workflow }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // Helper to get selected PDF filename from workflow
+  const getSelectedPdfFilename = () => {
+    if (!workflow || !workflow.nodes) return null;
+    const kbNode = workflow.nodes.find(
+      (n) => n.data && n.data.label === "KnowledgeBase" && n.data.filename
+    );
+    return kbNode ? kbNode.data.filename : null;
+  };
+
   const sendMessage = async () => {
     if (!input.trim()) return;
     setLoading(true);
     setMessages((msgs) => [...msgs, { sender: "user", text: input }]);
+    let contextText = "";
+    const pdfFilename = getSelectedPdfFilename();
+    if (pdfFilename) {
+      try {
+        const res = await axios.get(
+          `http://localhost:8000/document-text/${encodeURIComponent(
+            pdfFilename
+          )}`
+        );
+        contextText = res.data.text || "";
+      } catch (err) {
+        contextText = "";
+      }
+    }
     try {
-      // Replace with your backend endpoint and payload
       const res = await axios.post("http://localhost:8000/ask-gemini", {
         prompt: input,
-        context: "", // Optionally pass workflow/context
+        context: contextText,
       });
       setMessages((msgs) => [
         ...msgs,
